@@ -1,0 +1,67 @@
+name: Add booking
+
+# The button you press from the GitHub phone app to queue (or remove) a class.
+# After adding, it runs the planner straight away, so a class whose signup is
+# already open - or opens within the next 50 minutes - starts booking at once.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Add to the queue, or remove from it'
+        required: true
+        type: choice
+        options: [add, remove]
+        default: add
+      class_date:
+        description: 'Class date (YYYY-MM-DD, e.g. 2026-10-21)'
+        required: true
+        type: string
+      class_time:
+        description: 'Class time (24h Israel time, e.g. 08:00)'
+        required: true
+        type: string
+      category_filter:
+        description: 'Part of the class name, e.g. Hall A (leave blank for any)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write   # save the queue
+  actions: write    # start, or stop, a class's booking run
+
+jobs:
+  queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # Inputs go in through the environment, never pasted into the shell line,
+      # so a class name containing a quote or an apostrophe cannot break it.
+      - name: Update the queue
+        env:
+          TZ: Asia/Jerusalem
+          QUEUE_ACTION: ${{ inputs.action }}
+          CLASS_DATE: ${{ inputs.class_date }}
+          CLASS_TIME: ${{ inputs.class_time }}
+          CATEGORY: ${{ inputs.category_filter }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: |
+          python3 bookings.py "$QUEUE_ACTION" --date "$CLASS_DATE" --time "$CLASS_TIME" --category "$CATEGORY"
+          echo "--- queue is now ---"
+          python3 bookings.py list
+
+      - name: Start booking now if it opens soon
+        if: inputs.action == 'add'
+        env:
+          TZ: Asia/Jerusalem
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python3 bookings.py plan --lookahead-minutes 50

@@ -1,0 +1,59 @@
+name: Book one class
+run-name: Book ${{ inputs.class_date }} ${{ inputs.class_time }}
+
+# One run per class, started by the planner (book-due.yml) up to 50 minutes
+# before signup opens. book_class.py logs in, finds the class, waits, logs in
+# again a minute before, and fires on the exact second. The run name must stay
+# "Book <date> <time>": the planner uses it to see a run is already waiting.
+
+on:
+  workflow_dispatch:
+    inputs:
+      class_date:
+        description: 'Class date (YYYY-MM-DD)'
+        required: true
+        type: string
+      class_time:
+        description: 'Class time (24h Israel time)'
+        required: true
+        type: string
+      category_filter:
+        description: 'Part of the class name (for the record - the queue file decides)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write   # take the class off the queue when done
+
+# A second run for the same class waits for the first, then finds the class
+# gone from the queue and stops at once. Runs for different classes - e.g. a
+# Saturday and a Sunday class that both open on Thursday at 18:00 - go side by
+# side, so neither delays the other.
+concurrency:
+  group: book-${{ inputs.class_date }}-${{ inputs.class_time }}
+  cancel-in-progress: false
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    # Waits up to 50 minutes; on the two clock-change weekends a year it may
+    # wait one more hour for the second possible opening time.
+    timeout-minutes: 140
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Wait for the window and book
+        env:
+          TZ: Asia/Jerusalem
+          CLASS_DATE: ${{ inputs.class_date }}
+          CLASS_TIME: ${{ inputs.class_time }}
+          ARBOX_EMAIL: ${{ secrets.ARBOX_EMAIL }}
+          ARBOX_PASSWORD: ${{ secrets.ARBOX_PASSWORD }}
+          ARBOX_WHITELABEL: ${{ secrets.ARBOX_WHITELABEL }}
+          ARBOX_BOXES_ID: ${{ secrets.ARBOX_BOXES_ID }}
+          ARBOX_LOCATIONS_BOX_ID: ${{ secrets.ARBOX_LOCATIONS_BOX_ID }}
+          ARBOX_MEMBERSHIP_USER_ID: ${{ secrets.ARBOX_MEMBERSHIP_USER_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python3 bookings.py book --date "$CLASS_DATE" --time "$CLASS_TIME"

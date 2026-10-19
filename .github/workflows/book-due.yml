@@ -1,0 +1,40 @@
+name: Book due classes
+
+# The planner. It starts a "Book one class" run for every queued class whose
+# signup opens within the next 50 minutes; that run waits and fires on the
+# exact second.
+#
+# Main trigger: cron-job.org presses this workflow's "Run workflow" every 15
+# minutes through the GitHub API. Those starts happen within seconds. GitHub's
+# own timer below is only a backup: it is often late and sometimes skipped
+# altogether, which is why it isn't trusted with the main job. With a 50-minute
+# lookahead, every class gets three or more chances to be picked up in time.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '13,43 * * * *'
+
+permissions:
+  contents: write   # drop classes that have already started
+  actions: write    # start booking runs
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Two planners at once would only start the same runs twice; let one wait.
+    concurrency:
+      group: planner
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Start a booking run for anything opening soon
+        env:
+          TZ: Asia/Jerusalem
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python3 bookings.py plan --lookahead-minutes 50

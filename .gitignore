@@ -1,0 +1,8 @@
+config.json
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+day-*.json
+archive/
