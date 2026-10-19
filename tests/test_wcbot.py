@@ -15,7 +15,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import HTTPServer
 from pathlib import Path
 
@@ -42,10 +42,11 @@ def plain(text):
 
 class FakeWorld:
     def __init__(self):
-        self.tg_calls, self.dispatches, self.arbox_calls = [], [], []
+        self.tg_calls, self.dispatches, self.arbox_calls, self.range_calls = [], [], [], []
         self.dispatch_status = 204
         self.queue_files = {}
         self.days = {}
+        self.range_down = False
         self.next_id = 100
 
     def tg(self, method, **params):
@@ -72,6 +73,16 @@ class FakeWorld:
         self.arbox_calls.append(ds)
         return self.days.get(ds, [])
 
+    def arbox_range(self, first, last):
+        self.range_calls.append((first.isoformat(), last.isoformat()))
+        if self.range_down:
+            return None
+        out, d = [], first
+        while d <= last:
+            out += [dict(c, date=d.isoformat()) for c in self.days.get(d.isoformat()) or []]
+            d += timedelta(days=1)
+        return out
+
     # --- what the user sees -------------------------------------------------
     def last(self, method):
         return next(p for m, p in reversed(self.tg_calls) if m == method)
@@ -97,8 +108,9 @@ class FakeWorld:
 class BotTest(unittest.TestCase):
     def setUp(self):
         self.world = FakeWorld()
-        self.saved = {n: getattr(wcbot, n) for n in ("tg", "github", "arbox_day", "now")}
+        self.saved = {n: getattr(wcbot, n) for n in ("tg", "github", "arbox_day", "arbox_range", "now")}
         wcbot.tg, wcbot.github, wcbot.arbox_day = self.world.tg, self.world.github, self.world.arbox_day
+        wcbot.arbox_range = self.world.arbox_range
         wcbot.now = lambda: NOW
         self.env = {"BOT_TOKEN": "123:abc", "OWNER_CHAT_ID": str(OWNER), "ARBOX_EMAIL": "a@example.com",
                     "ARBOX_PASSWORD": "x", "GITHUB_TOKEN": "gh", "GITHUB_REPO": "ozargov/WC-Signup"}
@@ -272,6 +284,44 @@ class BotTest(unittest.TestCase):
     def test_empty_list(self):
         self.say("list")
         self.assertIn("Nothing is queued", self.world.last("sendMessage")["text"])
+
+    # --- what is booked -----------------------------------------------------
+    def test_booked_shows_booked_and_waiting(self):
+        w = self.world
+        w.days["2026-10-19"] = [cls(40, "07:00", "Earlier today", user_booked=1),  # over: hidden
+                                cls(41, "18:00", "Tonight", user_booked=2)]
+        w.days["2026-10-21"] = [cls(42, "17:00", "W.O.D Hall A", user_booked=3),
+                                cls(43, "19:00", "HYROX", is_booked=1)]
+        w.days["2026-10-22"] = [cls(44, "08:00", "Gymnastics", user_in_standby=7,
+                                    stand_by_position=3)]
+        w.queue_files["2026-10-25_0800.json"] = {"date": "2026-10-25", "time": "08:00",
+                                                 "category": "W.O.D Hall A"}
+        self.say("/booked")
+        text = plain(w.last("sendMessage")["text"])
+        self.assertIn("✅ Booked (3)", text)
+        self.assertIn("• Mon 19/10 18:00 Tonight", text)
+        self.assertIn("• Wed 21/10 17:00 W.O.D Hall A", text)
+        self.assertIn("• Wed 21/10 19:00 HYROX", text)
+        self.assertNotIn("Earlier today", text)
+        self.assertIn("🕒 Waiting list (1)", text)
+        self.assertIn("• Thu 22/10 08:00 Gymnastics - #3", text)
+        self.assertIn("📌 1 more queued", text)
+        self.assertEqual(w.range_calls, [("2026-10-19", "2026-11-02")], "one request, 14 days")
+
+    def test_what_is_booked_in_words(self):
+        self.say("What is booked?")
+        self.assertIn("Your classes", self.world.last("sendMessage")["text"])
+        self.assertIn("Nothing booked yet", self.world.last("sendMessage")["text"])
+
+    def test_booked_when_gym_unreachable(self):
+        self.world.range_down = True
+        self.say("/booked")
+        self.assertIn("Couldn't reach the gym", self.world.last("sendMessage")["text"])
+
+    def test_start_refreshes_the_menu(self):
+        self.say("/start")
+        commands = [c["command"] for c in self.world.last("setMyCommands")["commands"]]
+        self.assertEqual(commands, ["book", "booked", "list", "help"])
 
     # --- who may use it -----------------------------------------------------
     def test_strangers_are_turned_away(self):

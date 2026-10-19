@@ -35,6 +35,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -266,10 +267,20 @@ def clear_stuck_runs():
 # ---------------------------------------------------------------------------
 # Telegram notification (a one-off send, so it needs no always-on server)
 # ---------------------------------------------------------------------------
+def warn(text):
+    """On GitHub, a warning annotation on the run's page -- visible without
+    opening the log; anywhere else, a plain line."""
+    if in_actions():
+        print(f"::warning::{text}", flush=True)
+    else:
+        log(f"({text})")
+
+
 def notify(text):
     token = os.environ.get("BOT_TOKEN", "")
     chat  = os.environ.get("OWNER_CHAT_ID", "")
     if not token or not chat or chat == "0":
+        warn("No Telegram message sent: the BOT_TOKEN or OWNER_CHAT_ID secret is empty.")
         return
     body = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
     req  = urllib.request.Request(
@@ -278,8 +289,14 @@ def notify(text):
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             r.read()
+    except urllib.error.HTTPError as e:
+        # Telegram says why, e.g. "Unauthorized" (wrong token) or "chat not found"
+        # (wrong OWNER_CHAT_ID, or you never pressed Start in the bot's chat).
+        with e:
+            reason = e.read().decode("utf-8", "replace")[:200]
+        warn(f"Telegram refused the message (HTTP {e.code}): {reason}")
     except Exception as e:
-        log(f"(could not send the Telegram message: {e})")
+        warn(f"Could not send the Telegram message: {e}")
 
 
 # ---------------------------------------------------------------------------

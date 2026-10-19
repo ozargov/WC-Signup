@@ -408,9 +408,10 @@ def login(email, password, whitelabel):
 
 
 def fetch_schedule(class_date, locations_box_id, boxes_id, token, refresh, whitelabel,
-                   must=True):
-    """The day's classes. With must=False a failure returns None instead of
-    ending the run -- for the re-checks, where carrying on beats stopping."""
+                   must=True, to_date=None):
+    """The day's classes -- or, with to_date, every class from class_date to
+    to_date. With must=False a failure returns None instead of ending the run,
+    for the re-checks, where carrying on beats stopping."""
     if must:
         log(f"Step 2: fetching schedule for {class_date}...")
     iso = f"{class_date}T00:00:00.000Z"
@@ -420,7 +421,7 @@ def fetch_schedule(class_date, locations_box_id, boxes_id, token, refresh, white
             _headers(token, refresh, whitelabel),
             {
                 "from": iso,
-                "to": iso,
+                "to": f"{to_date or class_date}T00:00:00.000Z",
                 "locations_box_id": locations_box_id,
                 "boxes_id": boxes_id,
             },

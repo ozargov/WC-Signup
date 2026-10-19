@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -270,6 +271,47 @@ class QueueTest(unittest.TestCase):
         code, out = self.cli("book", "--date", "2099-01-07", "--time", "08:00")
         self.assertEqual(code, 0)
         self.assertIn("no longer queued", out)
+
+
+class NotifyTest(unittest.TestCase):
+    """A Telegram message that can't be sent leaves a warning on the GitHub run."""
+
+    def setUp(self):
+        self.old_env = {k: os.environ.get(k) for k in ("GITHUB_ACTIONS", "BOT_TOKEN", "OWNER_CHAT_ID")}
+        self.urlopen = bookings.urllib.request.urlopen
+        os.environ["GITHUB_ACTIONS"] = "true"
+
+    def tearDown(self):
+        bookings.urllib.request.urlopen = self.urlopen
+        for k, v in self.old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def send(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            bookings.notify("hello")
+        return out.getvalue()
+
+    def test_missing_secret(self):
+        os.environ.pop("BOT_TOKEN", None)
+        os.environ["OWNER_CHAT_ID"] = "1"
+        self.assertIn("::warning::No Telegram message sent", self.send())
+
+    def test_refused_with_telegrams_reason(self):
+        os.environ.update(BOT_TOKEN="123:abc", OWNER_CHAT_ID="1")
+
+        def refuse(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, io.BytesIO(
+                b'{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}'))
+
+        bookings.urllib.request.urlopen = refuse
+        out = self.send()
+        self.assertIn("::warning::Telegram refused the message (HTTP 400)", out)
+        self.assertIn("chat not found", out)
+        self.assertNotIn("123:abc", out, "the token never reaches the log")
 
 
 class SaveRaceTest(unittest.TestCase):

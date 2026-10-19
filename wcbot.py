@@ -38,6 +38,7 @@ from book_class import window_candidates_for
 
 QUEUE_WORKFLOW = "bot-queue.yml"
 WEEKS_AHEAD    = 2      # pick from this week and the next two
+BOOKED_DAYS    = 14     # /booked looks this many days ahead
 ARBOX_REUSE    = 600    # reuse a gym login for this many seconds
 
 HELP = (
@@ -45,10 +46,20 @@ HELP = (
     "• Send me any message and I'll show next week's classes. Tap a day, tap the "
     "class you want (one per day), then tap <b>📌 Book</b>.\n"
     "• Or type a day and time, like <i>wed 18:00 hall a</i> or <i>רביעי 7:00</i>.\n"
+    "• /booked shows what you're booked into, and your waiting lists.\n"
     "• /list shows what's queued, with buttons to remove.\n\n"
     "I book each class the second its signup opens and message you: ⏳ ready, "
     "✅ booked, or 🕒 waiting list."
 )
+
+COMMANDS = [
+    {"command": "book", "description": "Pick classes to book"},
+    {"command": "booked", "description": "What is booked"},
+    {"command": "list", "description": "What's queued"},
+    {"command": "help", "description": "How it works"},
+]
+
+BOOKED_PHRASES = ("/booked", "booked", "what is booked", "what's booked", "my classes")
 
 NOOP_TEXT = {
     "booked":  "You're already booked into this one.",
@@ -225,8 +236,9 @@ def queued_entries():
 _ARBOX = {"auth": None, "at": 0.0}
 
 
-def arbox_day(date_s):
-    """The gym's classes on that day, or None if the gym can't be reached."""
+def arbox_classes(first_s, last_s):
+    """The gym's classes from first_s to last_s (dates), or None if the gym
+    can't be reached. Reuses a recent login; logs in again if it was refused."""
     email, password = env("ARBOX_EMAIL"), env("ARBOX_PASSWORD")
     if not email or not password:
         return None
@@ -240,11 +252,21 @@ def arbox_day(date_s):
             if _ARBOX["auth"] is None:
                 return None
         token, refresh = _ARBOX["auth"]
-        classes = book_class.fetch_schedule(date_s, loc_box_id, boxes_id, token, refresh,
-                                            whitelabel, must=False)
+        classes = book_class.fetch_schedule(first_s, loc_box_id, boxes_id, token, refresh,
+                                            whitelabel, must=False, to_date=last_s)
         if classes is not None:
             return classes
     return None
+
+
+def arbox_day(date_s):
+    """The gym's classes on that day, or None if the gym can't be reached."""
+    return arbox_classes(date_s, date_s)
+
+
+def arbox_range(first, last):
+    """Every class from date first to date last, each carrying its own "date"."""
+    return arbox_classes(first.isoformat(), last.isoformat())
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +545,49 @@ def show_list(chat_id):
     send(chat_id, "\n".join(lines), {"inline_keyboard": rows}, as_html=False)
 
 
+def show_booked(chat_id):
+    """What the gym says you're in: booked classes and waiting lists, from today on."""
+    now_dt = now()
+    today = now_dt.date()
+    classes = arbox_range(today, today + timedelta(days=BOOKED_DAYS))
+    if classes is None:
+        send(chat_id, "⚠️ Couldn't reach the gym just now. Try again in a minute.", as_html=False)
+        return
+    booked, waiting = [], []
+    for cls in classes:
+        ds, t = str(cls.get("date", ""))[:10], str(cls.get("time", ""))[:5]
+        try:
+            start = datetime.strptime(f"{ds} {t}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+        if start <= now_dt:
+            continue
+        pick = (ds, t, str((cls.get("box_categories") or {}).get("name", "")).strip())
+        if cls.get("user_booked") is not None or cls.get("is_booked") == 1:
+            booked.append(pick)
+        elif cls.get("user_in_standby") is not None or str(cls.get("booking_option")) == "cancelWaitList":
+            waiting.append((pick, cls.get("stand_by_position")))
+    lines = [f"📅 <b>Your classes</b> - the next {BOOKED_DAYS} days", ""]
+    if booked:
+        lines.append(f"✅ <b>Booked ({len(booked)})</b>")
+        lines += [esc(selection_line(p)) for p in sorted(booked)]
+    else:
+        lines.append("✅ Nothing booked yet.")
+    if waiting:
+        lines += ["", f"🕒 <b>Waiting list ({len(waiting)})</b>"]
+        lines += [esc(selection_line(p)) + (f" - #{pos}" if pos is not None else "")
+                  for p, pos in sorted(waiting, key=lambda w: w[0])]
+    queued = queued_slots()
+    if queued:
+        lines += ["", f"📌 {len(queued)} more queued - they book when signup opens. /list"]
+    send(chat_id, "\n".join(lines))
+
+
+def set_commands():
+    """The menu Telegram shows next to the message box."""
+    tg("setMyCommands", commands=COMMANDS)
+
+
 def queue_typed(chat_id, typed):
     """Typed with a time but the gym's list couldn't be read: queue it as typed."""
     day, t, name = typed
@@ -542,10 +607,15 @@ def on_message(msg):
         return
     text = (msg.get("text") or "").strip()
     command = text.split()[0].lower().split("@")[0] if text else ""
+    if command in BOOKED_PHRASES or text.lower().rstrip("?!. ") in BOOKED_PHRASES:
+        show_booked(chat_id)
+        return
     if command in ("/list", "list", "queue", "/queue"):
         show_list(chat_id)
         return
     if command in ("/help", "help", "/start"):
+        if command == "/start":
+            set_commands()  # so a new command shows up in the menu without re-running setup
         send(chat_id, HELP)
         if command != "/start":
             return
@@ -675,11 +745,7 @@ def setup_webhook(url):
         return False, "<h3>BOT_TOKEN isn't set on Vercel yet.</h3>"
     ok = tg("setWebhook", url=url, secret_token=webhook_secret(),
             allowed_updates=["message", "callback_query"], drop_pending_updates=True)
-    tg("setMyCommands", commands=[
-        {"command": "book", "description": "Pick classes to book"},
-        {"command": "list", "description": "What's queued"},
-        {"command": "help", "description": "How it works"},
-    ])
+    set_commands()
     checks = []
     missing = [n for n in ("OWNER_CHAT_ID", "ARBOX_EMAIL", "ARBOX_PASSWORD", "GITHUB_TOKEN")
                if not env(n)]

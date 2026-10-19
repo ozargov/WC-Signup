@@ -12,8 +12,9 @@ the class you want (one per day — a new pick replaces that day's old one), the
 `full, 4 waiting`, `☑️ booked`, `🕒 waiting list #2`, `📌 queued`.
 
 - `wed 18:00 hall a`, `רביעי 7:00`, `25/10 07:00` — jump to that day with the class pre-ticked.
+- `/booked` (or "what is booked") — what the gym says you're booked into over the next 14 days, plus your waiting-list places.
 - `/list` — what's queued, each with a ❌ button to remove it.
-- `/help` — how it works.
+- `/help` — how it works. `/start` also refreshes the bot's command menu.
 
 How it fits together:
 
@@ -202,6 +203,12 @@ If signup is already open, it books (or joins the waiting list) straight away.
 
 📌 queued · ⏳ ready (its run has started and found the class) · ✅ booked ·
 🕒 on the waiting list, with your place · ❌ failed or no such class · ⚠️ something needs a look.
+
+These come from the GitHub runs, using the `BOT_TOKEN` and `OWNER_CHAT_ID`
+repository secrets (the bot's own replies use Vercel's copies). If a run can't
+send one, it leaves a yellow **warning** on the run's page with Telegram's
+reason — "Unauthorized" means the token is wrong; "chat not found" means the
+chat ID is wrong, or you never pressed Start in the bot's chat.
 
 ## Running costs
 
