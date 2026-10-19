@@ -124,11 +124,12 @@ An unset secret arrives as an empty string, which the code treats as "not set".
 
 | Field | Value |
 |---|---|
-| URL | `https://api.github.com/repos/ozargov/wc-signup/actions/workflows/book-due.yml/dispatches` |
+| URL | `https://api.github.com/repos/ozargov/WC-Signup/actions/workflows/book-due.yml/dispatches` |
 | Method | `POST` |
 | Body | `{"ref":"main"}` |
 | Headers | `Accept: application/vnd.github+json` · `Authorization: Bearer <token>` · `X-GitHub-Api-Version: 2022-11-28` · `Content-Type: application/json` |
-| Schedule | every 15 minutes, at :07, :22, :37 and :52 |
+| Schedule | every 15 minutes |
+| Notifications | on: email me when an execution fails (that's how you'll hear the token expired) |
 
 The token is a **fine-grained personal access token** for this repo only, with
 one permission: **Actions — Read and write**. It can start the planner; it can't
