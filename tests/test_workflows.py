@@ -67,9 +67,18 @@ class WorkflowTest(unittest.TestCase):
         import wcbot
         doc = self.load(wcbot.QUEUE_WORKFLOW)
         inputs = doc["on"]["workflow_dispatch"]["inputs"]
-        self.assertEqual(set(inputs), {"action", "classes"})
+        self.assertEqual(set(inputs), {"action", "classes", "summary"})
         self.assertEqual(inputs["action"]["options"], ["add", "remove"])
+        self.assertFalse(inputs["summary"]["required"], "an older bot sends no summary")
+        self.assertIn("inputs.summary", doc["run-name"])
         self.assertNotIn("concurrency", doc)
+
+    def test_timer_checks_for_stuck_runs(self):
+        steps = self.load("book-due.yml")["jobs"]["plan"]["steps"]
+        self.assertTrue(any("--check-stuck" in str(s.get("run", "")) for s in steps))
+
+    def test_requests_are_named_after_their_classes(self):
+        self.assertIn("inputs.class_date", self.load("add-booking.yml")["run-name"])
 
     def test_backup_timer_avoids_the_top_of_the_hour(self):
         crons = [s["cron"] for s in self.load("book-due.yml")["on"]["schedule"]]

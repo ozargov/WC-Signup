@@ -37,7 +37,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from book_class import hours_before_for, window_candidates_for
@@ -55,6 +55,12 @@ WAITLISTED_EXIT = 6
 
 # GitHub run states meaning "a booking run for this class is already on it".
 ACTIVE_STATES = {"queued", "in_progress", "waiting", "pending", "requested"}
+
+# How long GitHub may leave a run "queued" before it counts as stuck. A healthy
+# run gets a runner within a minute; on 2026-10-19 one sat queued for over 30
+# minutes, with no job ever created, while GitHub's status page was all green.
+STUCK_MINUTES = 10
+WATCHED_WORKFLOWS = ("bot-queue.yml", "add-booking.yml", BOOK_WORKFLOW)
 
 
 def log(msg):
@@ -170,9 +176,11 @@ def gh_runs():
     return json.loads(out)
 
 
-def active_run_titles():
+def active_run_titles(exclude=frozenset()):
+    """Titles of booking runs still on the go, leaving out the run ids in `exclude`."""
     try:
-        return {r["displayTitle"] for r in gh_runs() if r.get("status") in ACTIVE_STATES}
+        return {r["displayTitle"] for r in gh_runs()
+                if r.get("status") in ACTIVE_STATES and r.get("databaseId") not in exclude}
     except Exception as e:
         log(f"  (could not see which booking runs are active: {e} - starting runs anyway; "
             f"a duplicate waits its turn and then stops at once)")
@@ -198,6 +206,10 @@ def dispatch(entry, urgent):
     return False
 
 
+def cancel_run(run_id):
+    subprocess.run(["gh", "run", "cancel", str(run_id)], capture_output=True, text=True, timeout=60)
+
+
 def cancel_active_runs(entry):
     """Stop a booking run that is already waiting for this class, if there is one."""
     if not in_actions():
@@ -209,9 +221,46 @@ def cancel_active_runs(entry):
         return
     for r in runs:
         if r.get("displayTitle") == run_title(entry) and r.get("status") in ACTIVE_STATES:
-            subprocess.run(["gh", "run", "cancel", str(r["databaseId"])],
-                           capture_output=True, text=True, timeout=60)
+            cancel_run(r["databaseId"])
             log(f"  stopped booking run {r['databaseId']}, which was waiting for this class")
+
+
+def queued_runs(workflow):
+    out = subprocess.run(
+        ["gh", "run", "list", "--workflow", workflow, "--status", "queued", "--limit", "20",
+         "--json", "databaseId,displayTitle,createdAt"],
+        capture_output=True, text=True, timeout=60, check=True,
+    ).stdout
+    return json.loads(out)
+
+
+def clear_stuck_runs():
+    """Cancel runs GitHub accepted but never started, so none can run hours late
+    with old picks, and a stuck booking run can't stop its class being started
+    again. Stuck queue requests are reported so you can resend them; stuck
+    booking runs need nothing from you -- the planner starts them again.
+    Returns the ids of the runs it cancelled."""
+    cancelled = set()
+    now = datetime.now(timezone.utc)
+    for workflow in WATCHED_WORKFLOWS:
+        try:
+            runs = queued_runs(workflow)
+        except Exception as e:
+            log(f"  (could not check {workflow} for stuck runs: {e})")
+            continue
+        for r in runs:
+            created = datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00"))
+            minutes = (now - created).total_seconds() / 60
+            if minutes < STUCK_MINUTES:
+                continue
+            cancel_run(r["databaseId"])
+            cancelled.add(r["databaseId"])
+            title = r.get("displayTitle") or workflow
+            log(f"  STUCK    {title} - queued {minutes:.0f} min and never started; cancelled")
+            if workflow != BOOK_WORKFLOW:
+                notify(f"⚠️ GitHub never started this request, so I cancelled it:\n{title} "
+                       f"(sent {created.astimezone():%a %H:%M})\nPlease send it again.")
+    return cancelled
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +425,8 @@ def cmd_list(args):
 
 
 def cmd_plan(args):
+    # Before the queue: a stuck request may be exactly why the queue is empty.
+    cancelled = clear_stuck_runs() if args.check_stuck and not args.dry_run else set()
     entries = load()
     if not entries:
         log("The queue is empty - nothing to do.")
@@ -404,7 +455,7 @@ def cmd_plan(args):
         # Due -- including a window that has already opened: an open class can
         # still be booked if a spot is left, or else joined on the waiting list.
         if active is None:
-            active = set() if args.dry_run else active_run_titles()
+            active = set() if args.dry_run else active_run_titles(cancelled)
         if run_title(entry) in active:
             log(f"  running  {describe(entry)} - its booking run is already waiting")
             continue
@@ -528,6 +579,8 @@ def main():
     p_plan.add_argument("--lookahead-minutes", type=int, default=50)
     p_plan.add_argument("--dry-run", action="store_true",
                         help="say what would start, without starting or dropping anything")
+    p_plan.add_argument("--check-stuck", action="store_true",
+                        help=f"cancel runs GitHub left queued over {STUCK_MINUTES} min, and say so")
 
     p_book = sub.add_parser("book", help="wait for one class's window and book it")
     p_book.add_argument("--date", required=True)

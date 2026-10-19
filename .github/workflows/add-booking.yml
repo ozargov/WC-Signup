@@ -1,4 +1,5 @@
 name: Add booking
+run-name: "Add booking - ${{ inputs.action }} ${{ inputs.class_date }} ${{ inputs.class_time }}"
 
 # The button you press from the GitHub phone app to queue (or remove) a class.
 # After adding, it runs the planner straight away, so a class whose signup is

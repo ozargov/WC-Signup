@@ -37,4 +37,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-        run: python3 bookings.py plan --lookahead-minutes 50
+        # --check-stuck: cancel any run GitHub left queued for 10+ minutes;
+        # resend-worthy ones are reported on Telegram, booking runs restarted.
+        run: python3 bookings.py plan --lookahead-minutes 50 --check-stuck

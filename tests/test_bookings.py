@@ -12,9 +12,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bookings  # noqa: E402
@@ -46,19 +45,25 @@ class QueueTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.saved = (bookings.QUEUE_DIR, bookings.notify, bookings.dispatch,
-                      bookings.active_run_titles, bookings.BOOK_SCRIPT)
+                      bookings.active_run_titles, bookings.BOOK_SCRIPT,
+                      bookings.queued_runs, bookings.cancel_run)
         bookings.QUEUE_DIR = Path(self.tmp.name) / "queue"
         self.messages = []
         bookings.notify = self.messages.append
         self.dispatched = []
         bookings.dispatch = lambda entry, urgent: self.dispatched.append((entry["time"], urgent))
         self.active = set()
-        bookings.active_run_titles = lambda: self.active
+        bookings.active_run_titles = lambda exclude=frozenset(): self.active
+        self.stuck_runs = {}   # workflow file -> runs GitHub reports as queued
+        bookings.queued_runs = lambda workflow: self.stuck_runs.get(workflow, [])
+        self.cancelled = []
+        bookings.cancel_run = self.cancelled.append
         os.environ.pop("GITHUB_ACTIONS", None)
 
     def tearDown(self):
         (bookings.QUEUE_DIR, bookings.notify, bookings.dispatch,
-         bookings.active_run_titles, bookings.BOOK_SCRIPT) = self.saved
+         bookings.active_run_titles, bookings.BOOK_SCRIPT,
+         bookings.queued_runs, bookings.cancel_run) = self.saved
         self.tmp.cleanup()
 
     def cli(self, *argv):
@@ -178,6 +183,51 @@ class QueueTest(unittest.TestCase):
         self.add(self.need(10))
         self.cli("plan")
         self.assertEqual(self.dispatched[0][1], True)
+
+    # --- stuck runs ---------------------------------------------------------
+    @staticmethod
+    def ago(minutes):
+        return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_stuck_requests_are_cancelled_and_reported(self):
+        self.stuck_runs = {
+            "bot-queue.yml": [
+                {"databaseId": 1, "displayTitle": "Queue from Telegram - add Sun 25/10 07:00",
+                 "createdAt": self.ago(30)},
+                {"databaseId": 2, "displayTitle": "Queue from Telegram - add Mon 26/10 07:00",
+                 "createdAt": self.ago(2)},
+            ],
+            "book-class.yml": [
+                {"databaseId": 3, "displayTitle": "Book 2099-01-07 08:00", "createdAt": self.ago(12)},
+            ],
+        }
+        code, out = self.cli("plan", "--check-stuck")   # even with an empty queue
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(self.cancelled), [1, 3], "the 2-minute-old run is left alone")
+        self.assertEqual(len(self.messages), 1, "only the queue request needs you")
+        self.assertIn("Sun 25/10 07:00", self.messages[0])
+        self.assertIn("Please send it again", self.messages[0])
+
+    def test_planner_restarts_a_stuck_booking_run(self):
+        due = self.need(20)
+        self.add(due)
+        self.messages.clear()
+        title = f"Book {due:%Y-%m-%d} {due:%H:%M}"
+        self.stuck_runs = {"book-class.yml": [
+            {"databaseId": 9, "displayTitle": title, "createdAt": self.ago(15)}]}
+        # GitHub may still list the run as queued just after the cancel request.
+        bookings.active_run_titles = lambda exclude=frozenset(): set() if 9 in exclude else {title}
+        code, out = self.cli("plan", "--check-stuck")
+        self.assertEqual(self.cancelled, [9])
+        self.assertEqual([t for t, _ in self.dispatched], [f"{due:%H:%M}"])
+        self.assertEqual(self.messages, [], "nothing for you to do")
+
+    def test_stuck_check_only_when_asked(self):
+        self.stuck_runs = {"bot-queue.yml": [
+            {"databaseId": 1, "displayTitle": "x", "createdAt": self.ago(60)}]}
+        self.cli("plan")
+        self.cli("plan", "--check-stuck", "--dry-run")
+        self.assertEqual(self.cancelled, [])
 
     # --- book ---------------------------------------------------------------
     def book_with(self, exit_code, lines=""):

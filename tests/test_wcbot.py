@@ -173,6 +173,7 @@ class BotTest(unittest.TestCase):
             {"date": "2026-10-25", "time": "07:00", "category": "HYROX"},
             {"date": "2026-10-27", "time": "19:00", "category": "Gymnastics Hall B"},
         ])
+        self.assertEqual(sent["summary"], "Sun 25/10 07:00, Tue 27/10 19:00")
         self.assertIn("Sending 2 classes", self.world.last("editMessageText")["text"])
 
     def test_untick(self):

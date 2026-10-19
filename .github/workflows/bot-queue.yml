@@ -1,4 +1,5 @@
 name: Queue from Telegram
+run-name: "Queue from Telegram - ${{ inputs.action }} ${{ inputs.summary }}"
 
 # Started by the Telegram bot (wcbot.py on Vercel) when you tap Book or Remove.
 # It changes the queue in one save, sends the confirmation to Telegram, and
@@ -18,6 +19,11 @@ on:
         description: 'The classes, as the bot sends them (JSON)'
         required: true
         type: string
+      summary:
+        description: 'Which classes, in words - shows in the run name, so a stuck request can be named'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write   # save the queue

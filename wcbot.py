@@ -158,10 +158,21 @@ def github(method, path, body=None):
         return 599, None
 
 
+def summary_of(classes):
+    """ "Sun 25/10 07:00, Tue 27/10 19:00" - names the request in GitHub's run list."""
+    parts = []
+    for c in classes:
+        d = date.fromisoformat(c["date"])
+        parts.append(f"{d:%a} {d.day:02d}/{d.month:02d} {c['time']}")
+    text = ", ".join(parts)
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
 def send_to_queue(action, classes):
     """Start the "Queue from Telegram" workflow. Returns None, or what went wrong."""
     status, _ = github("POST", f"/repos/{repo()}/actions/workflows/{QUEUE_WORKFLOW}/dispatches",
-                       {"ref": "main", "inputs": {"action": action, "classes": json.dumps(classes)}})
+                       {"ref": "main", "inputs": {"action": action, "classes": json.dumps(classes),
+                                                  "summary": summary_of(classes)}})
     if status in (200, 204):
         return None
     if status in (401, 403):
