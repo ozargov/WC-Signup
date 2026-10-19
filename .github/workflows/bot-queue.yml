@@ -11,10 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'add or remove'
+        description: 'add, remove, or ping (the bot''s /test message)'
         required: true
         type: choice
-        options: [add, remove]
+        options: [add, remove, ping]
       classes:
         description: 'The classes, as the bot sends them (JSON)'
         required: true
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Update the queue
+      - name: Update the queue (or send the test message)
         env:
           TZ: Asia/Jerusalem
           QUEUE_ACTION: ${{ inputs.action }}
@@ -45,7 +45,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-        run: python3 bookings.py "$QUEUE_ACTION-many" --classes "$CLASSES"
+        run: |
+          if [ "$QUEUE_ACTION" = "ping" ]; then
+            python3 bookings.py ping
+          else
+            python3 bookings.py "$QUEUE_ACTION-many" --classes "$CLASSES"
+          fi
 
       - name: Start booking now if it opens soon
         if: inputs.action == 'add'

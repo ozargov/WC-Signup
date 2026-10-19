@@ -14,6 +14,7 @@ the class you want (one per day — a new pick replaces that day's old one), the
 - `wed 18:00 hall a`, `רביעי 7:00`, `25/10 07:00` — jump to that day with the class pre-ticked.
 - `/booked` (or "what is booked") — what the gym says you're booked into over the next 14 days, plus your waiting-list places.
 - `/list` — what's queued, each with a ❌ button to remove it.
+- `/test` — GitHub sends you a test message. The booking messages come from GitHub, not from the bot, so this proves they'll reach you.
 - `/help` — how it works. `/start` also refreshes the bot's command menu.
 
 How it fits together:

@@ -47,7 +47,8 @@ HELP = (
     "class you want (one per day), then tap <b>📌 Book</b>.\n"
     "• Or type a day and time, like <i>wed 18:00 hall a</i> or <i>רביעי 7:00</i>.\n"
     "• /booked shows what you're booked into, and your waiting lists.\n"
-    "• /list shows what's queued, with buttons to remove.\n\n"
+    "• /list shows what's queued, with buttons to remove.\n"
+    "• /test checks that GitHub's booking messages reach you.\n\n"
     "I book each class the second its signup opens and message you: ⏳ ready, "
     "✅ booked, or 🕒 waiting list."
 )
@@ -56,6 +57,7 @@ COMMANDS = [
     {"command": "book", "description": "Pick classes to book"},
     {"command": "booked", "description": "What is booked"},
     {"command": "list", "description": "What's queued"},
+    {"command": "test", "description": "Check GitHub's messages reach you"},
     {"command": "help", "description": "How it works"},
 ]
 
@@ -612,6 +614,15 @@ def on_message(msg):
         return
     if command in ("/list", "list", "queue", "/queue"):
         show_list(chat_id)
+        return
+    if command in ("/test", "test"):
+        # The booking messages come from GitHub, not from this bot -- so ask
+        # GitHub to send one, rather than answering here.
+        err = send_to_queue("ping", [])
+        send(chat_id, f"⚠️ {esc(err)}" if err else
+             "📨 Asked GitHub to message you. It should arrive within a minute.\n"
+             "If it doesn't, GitHub can't reach you on Telegram: check the BOT_TOKEN "
+             "and OWNER_CHAT_ID repository secrets.")
         return
     if command in ("/help", "help", "/start"):
         if command == "/start":

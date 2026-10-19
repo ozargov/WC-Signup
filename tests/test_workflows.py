@@ -19,7 +19,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 KNOWN_SECRETS = {"ARBOX_EMAIL", "ARBOX_PASSWORD", "ARBOX_WHITELABEL", "ARBOX_BOXES_ID",
                  "ARBOX_LOCATIONS_BOX_ID", "ARBOX_MEMBERSHIP_USER_ID", "BOT_TOKEN",
                  "OWNER_CHAT_ID"}
-COMMANDS = {"add", "remove", "add-many", "remove-many", "list", "plan", "book"}
+COMMANDS = {"add", "remove", "add-many", "remove-many", "list", "plan", "book", "ping"}
 
 
 @unittest.skipIf(yaml is None, "PyYAML not installed")
@@ -68,7 +68,7 @@ class WorkflowTest(unittest.TestCase):
         doc = self.load(wcbot.QUEUE_WORKFLOW)
         inputs = doc["on"]["workflow_dispatch"]["inputs"]
         self.assertEqual(set(inputs), {"action", "classes", "summary"})
-        self.assertEqual(inputs["action"]["options"], ["add", "remove"])
+        self.assertEqual(inputs["action"]["options"], ["add", "remove", "ping"])
         self.assertFalse(inputs["summary"]["required"], "an older bot sends no summary")
         self.assertIn("inputs.summary", doc["run-name"])
         self.assertNotIn("concurrency", doc)

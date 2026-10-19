@@ -190,13 +190,15 @@ class QueueTest(unittest.TestCase):
     def ago(minutes):
         return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def test_stuck_requests_are_cancelled_and_reported(self):
+    def test_stuck_requests_are_cancelled_and_reported_once(self):
         self.stuck_runs = {
             "bot-queue.yml": [
                 {"databaseId": 1, "displayTitle": "Queue from Telegram - add Sun 25/10 07:00",
-                 "createdAt": self.ago(30)},
+                 "createdAt": self.ago(15)},
                 {"databaseId": 2, "displayTitle": "Queue from Telegram - add Mon 26/10 07:00",
                  "createdAt": self.ago(2)},
+                # Stuck long ago, GitHub won't cancel it: you've already been told.
+                {"databaseId": 4, "displayTitle": "Queue from Telegram", "createdAt": self.ago(70)},
             ],
             "book-class.yml": [
                 {"databaseId": 3, "displayTitle": "Book 2099-01-07 08:00", "createdAt": self.ago(12)},
@@ -204,10 +206,15 @@ class QueueTest(unittest.TestCase):
         }
         code, out = self.cli("plan", "--check-stuck")   # even with an empty queue
         self.assertEqual(code, 0, out)
-        self.assertEqual(sorted(self.cancelled), [1, 3], "the 2-minute-old run is left alone")
-        self.assertEqual(len(self.messages), 1, "only the queue request needs you")
+        self.assertEqual(sorted(self.cancelled), [1, 3, 4], "the 2-minute-old run is left alone")
+        self.assertEqual(len(self.messages), 1, "one message, for the newly stuck request")
         self.assertIn("Sun 25/10 07:00", self.messages[0])
         self.assertIn("Please send it again", self.messages[0])
+
+    def test_ping(self):
+        code, out = self.cli("ping")
+        self.assertEqual(code, 0)
+        self.assertIn("Test from GitHub", self.messages[-1])
 
     def test_planner_restarts_a_stuck_booking_run(self):
         due = self.need(20)
@@ -312,6 +319,73 @@ class NotifyTest(unittest.TestCase):
         self.assertIn("::warning::Telegram refused the message (HTTP 400)", out)
         self.assertIn("chat not found", out)
         self.assertNotIn("123:abc", out, "the token never reaches the log")
+
+    def test_pasted_line_breaks_are_trimmed(self):
+        # The real failure on 2026-10-19: the BOT_TOKEN secret ended in a line break.
+        os.environ.update(BOT_TOKEN="123:abc\n", OWNER_CHAT_ID=" 1\n")
+        seen = []
+
+        class Ok:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"ok":true}'
+
+        def capture(req, timeout=None):
+            seen.append((req.full_url, req.data))
+            return Ok()
+
+        bookings.urllib.request.urlopen = capture
+        out = self.send()
+        self.assertEqual(out, "", "sent without a warning")
+        self.assertEqual(seen[0][0], "https://api.telegram.org/bot123:abc/sendMessage")
+        self.assertIn(b"chat_id=1&", seen[0][1])
+
+
+class CancelRunTest(unittest.TestCase):
+    """A run GitHub won't cancel normally gets a forced cancel; if that fails too, a warning."""
+
+    def setUp(self):
+        self.run = bookings.subprocess.run
+        self.old = os.environ.get("GITHUB_ACTIONS")
+        os.environ["GITHUB_ACTIONS"] = "true"
+
+    def tearDown(self):
+        bookings.subprocess.run = self.run
+        if self.old is None:
+            os.environ.pop("GITHUB_ACTIONS", None)
+        else:
+            os.environ["GITHUB_ACTIONS"] = self.old
+
+    def fake(self, codes):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, codes[len(calls) - 1], "", "HTTP 409: Conflict")
+        bookings.subprocess.run = run
+        return calls
+
+    def test_normal_cancel(self):
+        calls = self.fake([0])
+        self.assertTrue(bookings.cancel_run(7))
+        self.assertEqual(calls, [["gh", "run", "cancel", "7"]])
+
+    def test_falls_back_to_force_cancel(self):
+        calls = self.fake([1, 0])
+        self.assertTrue(bookings.cancel_run(7))
+        self.assertIn("repos/{owner}/{repo}/actions/runs/7/force-cancel", calls[1])
+
+    def test_both_refused_leaves_a_warning(self):
+        self.fake([1, 1])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertFalse(bookings.cancel_run(7))
+        self.assertIn("::warning::GitHub refused to cancel run 7", out.getvalue())
 
 
 class SaveRaceTest(unittest.TestCase):

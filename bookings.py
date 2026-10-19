@@ -208,7 +208,19 @@ def dispatch(entry, urgent):
 
 
 def cancel_run(run_id):
-    subprocess.run(["gh", "run", "cancel", str(run_id)], capture_output=True, text=True, timeout=60)
+    """Cancel a run; True if GitHub accepted. A run stuck before it ever started
+    can refuse a normal cancel, so a forced cancel is tried next."""
+    attempts = (["gh", "run", "cancel", str(run_id)],
+                ["gh", "api", "--method", "POST",
+                 "repos/{owner}/{repo}/actions/runs/%s/force-cancel" % run_id])
+    reasons = []
+    for cmd in attempts:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            return True
+        reasons.append((result.stderr or result.stdout).strip()[:150])
+    warn(f"GitHub refused to cancel run {run_id}: " + " / ".join(reasons))
+    return False
 
 
 def cancel_active_runs(entry):
@@ -254,12 +266,18 @@ def clear_stuck_runs():
             minutes = (now - created).total_seconds() / 60
             if minutes < STUCK_MINUTES:
                 continue
-            cancel_run(r["databaseId"])
+            ok = cancel_run(r["databaseId"])
+            # Even if GitHub won't cancel it, treat it as gone: a stuck booking
+            # run mustn't stop its class being started afresh.
             cancelled.add(r["databaseId"])
             title = r.get("displayTitle") or workflow
-            log(f"  STUCK    {title} - queued {minutes:.0f} min and never started; cancelled")
-            if workflow != BOOK_WORKFLOW:
-                notify(f"⚠️ GitHub never started this request, so I cancelled it:\n{title} "
+            log(f"  STUCK    {title} - queued {minutes:.0f} min and never started; "
+                + ("cancelled" if ok else "GitHub refused to cancel it"))
+            # Tell you once: only the timer pass that first sees it stuck. A run
+            # GitHub won't cancel stays listed, and would otherwise repeat.
+            first_sighting = minutes < STUCK_MINUTES + 15
+            if workflow != BOOK_WORKFLOW and first_sighting:
+                notify(f"⚠️ GitHub never started this request:\n{title} "
                        f"(sent {created.astimezone():%a %H:%M})\nPlease send it again.")
     return cancelled
 
@@ -277,8 +295,10 @@ def warn(text):
 
 
 def notify(text):
-    token = os.environ.get("BOT_TOKEN", "")
-    chat  = os.environ.get("OWNER_CHAT_ID", "")
+    # Trimmed: a pasted secret can carry an invisible line break, and on
+    # 2026-10-19 one did -- every message from GitHub failed until this.
+    token = os.environ.get("BOT_TOKEN", "").strip()
+    chat  = os.environ.get("OWNER_CHAT_ID", "").strip()
     if not token or not chat or chat == "0":
         warn("No Telegram message sent: the BOT_TOKEN or OWNER_CHAT_ID secret is empty.")
         return
@@ -418,6 +438,14 @@ def cmd_remove_many(args):
     text = "🗑 Removed: " + ", ".join(describe(e) for _p, e in found)
     log(text)
     notify(text)
+    return 0
+
+
+def cmd_ping(args):
+    """The bot's /test: prove GitHub can reach you on Telegram."""
+    notify("✅ Test from GitHub: messages reach you. You'll get ⏳ Ready, ✅ Booked and "
+           "🕒 waiting-list messages here.")
+    log("Sent the test message.")
     return 0
 
 
@@ -591,6 +619,7 @@ def main():
     p_rmm.add_argument("--classes", required=True, help='JSON: [{"date", "time"}]')
 
     sub.add_parser("list", help="show the queue")
+    sub.add_parser("ping", help="send a test Telegram message (the bot's /test)")
 
     p_plan = sub.add_parser("plan", help="start a booking run for anything opening soon")
     p_plan.add_argument("--lookahead-minutes", type=int, default=50)
@@ -608,7 +637,7 @@ def main():
 
     args = ap.parse_args()
     handlers = {"add": cmd_add, "remove": cmd_remove, "add-many": cmd_add_many,
-                "remove-many": cmd_remove_many, "list": cmd_list,
+                "remove-many": cmd_remove_many, "list": cmd_list, "ping": cmd_ping,
                 "plan": cmd_plan, "book": cmd_book}
     return handlers[args.command](args)
 

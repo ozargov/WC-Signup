@@ -321,7 +321,16 @@ class BotTest(unittest.TestCase):
     def test_start_refreshes_the_menu(self):
         self.say("/start")
         commands = [c["command"] for c in self.world.last("setMyCommands")["commands"]]
-        self.assertEqual(commands, ["book", "booked", "list", "help"])
+        self.assertEqual(commands, ["book", "booked", "list", "test", "help"])
+
+    def test_test_asks_github_to_message_you(self):
+        self.say("/test")
+        self.assertEqual(self.world.dispatches[-1]["action"], "ping")
+        self.assertEqual(json.loads(self.world.dispatches[-1]["classes"]), [])
+        self.assertIn("Asked GitHub to message you", self.world.last("sendMessage")["text"])
+        self.world.dispatch_status = 401
+        self.say("/test")
+        self.assertIn("refused the bot's key", plain(self.world.last("sendMessage")["text"]))
 
     # --- who may use it -----------------------------------------------------
     def test_strangers_are_turned_away(self):
