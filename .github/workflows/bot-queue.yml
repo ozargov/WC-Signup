@@ -1,0 +1,52 @@
+name: Queue from Telegram
+
+# Started by the Telegram bot (wcbot.py on Vercel) when you tap Book or Remove.
+# It changes the queue in one save, sends the confirmation to Telegram, and
+# starts a booking run at once for anything opening within 50 minutes.
+# The bot's GitHub key can only start workflows like this one -- it can't
+# change code or read secrets -- so the actual queue edit happens here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'add or remove'
+        required: true
+        type: choice
+        options: [add, remove]
+      classes:
+        description: 'The classes, as the bot sends them (JSON)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # save the queue
+  actions: write    # start, or stop, booking runs
+
+jobs:
+  queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Update the queue
+        env:
+          TZ: Asia/Jerusalem
+          QUEUE_ACTION: ${{ inputs.action }}
+          CLASSES: ${{ inputs.classes }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python3 bookings.py "$QUEUE_ACTION-many" --classes "$CLASSES"
+
+      - name: Start booking now if it opens soon
+        if: inputs.action == 'add'
+        env:
+          TZ: Asia/Jerusalem
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python3 bookings.py plan --lookahead-minutes 50

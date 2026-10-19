@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ':(exclude)queue'",
+  "functions": {
+    "api/telegram.py": {
+      "excludeFiles": "{tests/**,queue/**,archive/**,.github/**,public/**,**/*.md}"
+    }
+  }
+}

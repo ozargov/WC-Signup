@@ -285,6 +285,76 @@ def cmd_remove(args):
     return 0
 
 
+def read_classes(raw):
+    """The JSON list the Telegram bot sends: [{"date", "time", "category"}, ...]."""
+    try:
+        items = json.loads(raw)
+    except ValueError:
+        raise SystemExit("--classes must be a JSON list of {date, time, category}.")
+    if not isinstance(items, list):
+        raise SystemExit("--classes must be a JSON list of {date, time, category}.")
+    return [(parse_input(str(i.get("date", "")), str(i.get("time", ""))), i) for i in items]
+
+
+def cmd_add_many(args):
+    """Queue several classes in one save and one message -- what the bot's Book button does."""
+    now = datetime.now()
+    entries, past = [], []
+    for target, item in read_classes(args.classes):
+        entry = {
+            "date":     f"{target:%Y-%m-%d}",
+            "time":     f"{target:%H:%M}",
+            "category": str(item.get("category") or "").strip(),
+            "added":    now.strftime("%Y-%m-%d %H:%M"),
+        }
+        (past if target < now else entries).append((target, entry))
+
+    def change():
+        QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+        for target, entry in entries:
+            entry_path(target).write_text(json.dumps(entry, indent=2, ensure_ascii=False) + "\n",
+                                          encoding="utf-8")
+
+    if entries and not save_change(change, f"Queue: add {len(entries)} from Telegram"):
+        notify("⚠️ Could not save your classes to the queue. Please try again.")
+        return 1
+    count = len(entries)
+    lines = [f"📌 Queued {count} class{'es' if count != 1 else ''}:"] if entries else []
+    lines += [f"• {describe(e)} - books {window_text(t)}" for t, e in entries]
+    if past:
+        lines.append("Skipped, already started: " + ", ".join(describe(e) for _t, e in past))
+    log("\n".join(lines))
+    notify("\n".join(lines))
+    return 0
+
+
+def cmd_remove_many(args):
+    """Remove several classes in one save, stopping any booking run already waiting."""
+    found = []
+    for target, _item in read_classes(args.classes):
+        path = entry_path(target)
+        if path.exists():
+            found.append((path, read_entry(path)))
+    if not found:
+        log("None of those classes were queued.")
+        notify("🗑 Nothing to remove - those classes weren't queued.")
+        return 0
+
+    def change():
+        for path, _entry in found:
+            path.unlink(missing_ok=True)
+
+    if not save_change(change, f"Queue: remove {len(found)} from Telegram"):
+        notify("⚠️ Could not remove those classes. Please try again.")
+        return 1
+    for _path, entry in found:
+        cancel_active_runs(entry)
+    text = "🗑 Removed: " + ", ".join(describe(e) for _p, e in found)
+    log(text)
+    notify(text)
+    return 0
+
+
 def cmd_list(args):
     entries = load()
     if not entries:
@@ -446,6 +516,12 @@ def main():
     p_rm.add_argument("--time", required=True)
     p_rm.add_argument("--category", default="", help="ignored; matching is on date and time")
 
+    p_addm = sub.add_parser("add-many", help="queue several classes (the Telegram bot)")
+    p_addm.add_argument("--classes", required=True, help='JSON: [{"date", "time", "category"}]')
+
+    p_rmm = sub.add_parser("remove-many", help="remove several classes (the Telegram bot)")
+    p_rmm.add_argument("--classes", required=True, help='JSON: [{"date", "time"}]')
+
     sub.add_parser("list", help="show the queue")
 
     p_plan = sub.add_parser("plan", help="start a booking run for anything opening soon")
@@ -461,7 +537,8 @@ def main():
                         help="go through the motions without actually booking")
 
     args = ap.parse_args()
-    handlers = {"add": cmd_add, "remove": cmd_remove, "list": cmd_list,
+    handlers = {"add": cmd_add, "remove": cmd_remove, "add-many": cmd_add_many,
+                "remove-many": cmd_remove_many, "list": cmd_list,
                 "plan": cmd_plan, "book": cmd_book}
     return handlers[args.command](args)
 

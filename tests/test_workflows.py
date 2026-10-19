@@ -19,7 +19,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 KNOWN_SECRETS = {"ARBOX_EMAIL", "ARBOX_PASSWORD", "ARBOX_WHITELABEL", "ARBOX_BOXES_ID",
                  "ARBOX_LOCATIONS_BOX_ID", "ARBOX_MEMBERSHIP_USER_ID", "BOT_TOKEN",
                  "OWNER_CHAT_ID"}
-COMMANDS = {"add", "remove", "list", "plan", "book"}
+COMMANDS = {"add", "remove", "add-many", "remove-many", "list", "plan", "book"}
 
 
 @unittest.skipIf(yaml is None, "PyYAML not installed")
@@ -31,7 +31,7 @@ class WorkflowTest(unittest.TestCase):
 
     def test_exactly_these_workflows(self):
         self.assertEqual(sorted(p.name for p in WORKFLOWS.glob("*.yml")),
-                         ["add-booking.yml", "book-class.yml", "book-due.yml"])
+                         ["add-booking.yml", "book-class.yml", "book-due.yml", "bot-queue.yml"])
 
     def test_all_parse_and_can_be_started_by_hand(self):
         for path in WORKFLOWS.glob("*.yml"):
@@ -58,9 +58,18 @@ class WorkflowTest(unittest.TestCase):
         self.assertGreaterEqual(doc["jobs"]["book"]["timeout-minutes"], 125)
         self.assertEqual(doc["permissions"], {"contents": "write"})
 
-    def test_planner_and_button_can_start_runs(self):
-        for name in ("add-booking.yml", "book-due.yml"):
+    def test_planner_and_buttons_can_start_runs(self):
+        for name in ("add-booking.yml", "book-due.yml", "bot-queue.yml"):
             self.assertEqual(self.load(name)["permissions"].get("actions"), "write", name)
+
+    def test_bot_queue_matches_the_bot(self):
+        sys.path.insert(0, str(ROOT))
+        import wcbot
+        doc = self.load(wcbot.QUEUE_WORKFLOW)
+        inputs = doc["on"]["workflow_dispatch"]["inputs"]
+        self.assertEqual(set(inputs), {"action", "classes"})
+        self.assertEqual(inputs["action"]["options"], ["add", "remove"])
+        self.assertNotIn("concurrency", doc)
 
     def test_backup_timer_avoids_the_top_of_the_hour(self):
         crons = [s["cron"] for s in self.load("book-due.yml")["on"]["schedule"]]

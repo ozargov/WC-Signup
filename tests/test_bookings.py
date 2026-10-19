@@ -116,6 +116,30 @@ class QueueTest(unittest.TestCase):
         code, out = self.cli("remove", "--date", "2099-01-07", "--time", "08:00")
         self.assertIn("Nothing queued", out)
 
+    # --- from the Telegram bot -----------------------------------------------
+    def test_add_many_and_remove_many(self):
+        classes = json.dumps([{"date": "2099-01-07", "time": "07:00", "category": "HYROX"},
+                              {"date": "2099-01-08", "time": "19:00", "category": "Hall B"},
+                              {"date": "2020-01-01", "time": "07:00", "category": "old"}])
+        code, out = self.cli("add-many", "--classes", classes)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.queued(), ["2099-01-07_0700.json", "2099-01-08_1900.json"])
+        self.assertTrue(self.messages[-1].startswith("📌 Queued 2 classes:"), self.messages)
+        self.assertIn("(HYROX)", self.messages[-1])
+        self.assertIn("Skipped, already started", self.messages[-1])
+
+        code, out = self.cli("remove-many", "--classes",
+                             json.dumps([{"date": "2099-01-07", "time": "07:00"}]))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.queued(), ["2099-01-08_1900.json"])
+        self.assertIn("🗑 Removed", self.messages[-1])
+
+    def test_add_many_rejects_garbage(self):
+        with self.assertRaises(SystemExit):
+            self.cli("add-many", "--classes", "not json")
+        with self.assertRaises(SystemExit):
+            self.cli("add-many", "--classes", json.dumps([{"date": "someday", "time": "08:00"}]))
+
     # --- plan ---------------------------------------------------------------
     def test_plan_starts_only_what_is_due(self):
         due = self.need(30)

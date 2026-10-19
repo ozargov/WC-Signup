@@ -1,7 +1,52 @@
 # WC Signup — Setup
 
-Books CrossFit White City classes the moment signup opens. Runs on GitHub
-Actions in a public repo, so it is free, and needs no computer of yours to be on.
+Books CrossFit White City classes the moment signup opens. You pick classes in
+a Telegram bot; GitHub Actions books each one on the second. All of it is free
+and needs no computer of yours to be on.
+
+## The Telegram bot
+
+Send the bot any message and it shows **next week's classes**. Tap a day, tap
+the class you want (one per day — a new pick replaces that day's old one), then
+**📌 Book**. Each class shows its state: `opens Thu 07:00`, `12 free`,
+`full, 4 waiting`, `☑️ booked`, `🕒 waiting list #2`, `📌 queued`.
+
+- `wed 18:00 hall a`, `רביעי 7:00`, `25/10 07:00` — jump to that day with the class pre-ticked.
+- `/list` — what's queued, each with a ❌ button to remove it.
+- `/help` — how it works.
+
+How it fits together:
+
+1. The bot (`wcbot.py`) runs on **Vercel** as a webhook (`api/telegram.py`):
+   Telegram calls it when you send something, so nothing runs in between.
+   It reads the class list from the gym's API and keeps your picks in the
+   message itself, so it needs no storage of its own.
+2. **Book** starts the **Queue from Telegram** workflow (`bot-queue.yml`), which
+   saves the picks to `queue/`, sends the 📌 confirmation, and starts a booking
+   run at once for anything opening within 50 minutes.
+3. From there, the timing below takes over.
+
+The bot's GitHub key can only **start workflows** (Actions: read and write). It
+can't change code or read the repo's secrets, which is why the queue edit
+happens in a workflow rather than in the bot.
+
+### Vercel settings
+
+| Environment variable | Value |
+|---|---|
+| `BOT_TOKEN` | the Telegram bot token |
+| `OWNER_CHAT_ID` | your Telegram user ID — the bot ignores everyone else |
+| `ARBOX_EMAIL` / `ARBOX_PASSWORD` | your HYPR login, to read the class list |
+| `GITHUB_TOKEN` | fine-grained token, this repo only, **Actions: read and write** |
+| `GITHUB_REPO` | optional; defaults to `ozargov/WC-Signup` |
+
+After the first deploy, open `https://<your-project>.vercel.app/api/telegram?setup=1`
+once. It connects Telegram to the bot (with a secret only Telegram knows,
+derived from the bot token), sets the bot's command menu, and checks the
+settings. Open it again if the bot token ever changes.
+
+Vercel redeploys on every push, except pushes that only change `queue/`
+(`vercel.json` → `ignoreCommand`).
 
 ## The problem this has to solve
 
@@ -91,13 +136,17 @@ members' personal details redacted) if the API ever changes shape.
 
 | File | Role |
 |---|---|
+| `wcbot.py` | The Telegram bot: week picker, `/list`, typed shortcuts. |
+| `api/telegram.py` | Vercel's entry point for the bot (and the `?setup=1` link). |
+| `vercel.json`, `public/` | Vercel settings, and a placeholder page so nothing else is served. |
 | `queue/` | The queue: one file per class you want, e.g. `2026-10-21_0800.json`. |
 | `bookings.py` | Adds to / removes from the queue, plans which classes are due, runs one booking. |
 | `book_class.py` | Logs in, finds the class, waits to the moment, fires, falls back to the waiting list. |
-| `.github/workflows/add-booking.yml` | **Add booking** — the button you press from your phone. |
+| `.github/workflows/bot-queue.yml` | **Queue from Telegram** — started by the bot's Book and Remove buttons. |
+| `.github/workflows/add-booking.yml` | **Add booking** — a backup button in the GitHub app. |
 | `.github/workflows/book-due.yml` | **Book due classes** — the planner. |
 | `.github/workflows/book-class.yml` | **Book one class** — one run per class. |
-| `tests/` | Runs everything against a simulated gym API: `python -m unittest discover -s tests` (the workflow checks need PyYAML). |
+| `tests/` | Runs everything against simulated gym, Telegram and GitHub APIs: `python -m unittest discover -s tests` (the workflow checks need PyYAML). |
 
 One file per class means two runs changing the queue at the same moment never
 touch the same file. Saving to GitHub retries from the latest copy if another
@@ -137,9 +186,10 @@ read your secrets or change the code. It expires: GitHub emails you before it
 does. Make a new one and paste it into cron-job.org. Until you do, only the late
 backup timer runs.
 
-## Booking a class from your phone
+## Backup: booking from the GitHub app
 
-GitHub app → your repo → **Actions** → **Add booking** → **Run workflow**:
+If the Telegram bot is ever down: GitHub app → your repo → **Actions** →
+**Add booking** → **Run workflow**:
 
 - **action** — `add`, or `remove` to cancel one (this also stops its booking run if it already started)
 - **class_date** — `2026-10-21`
@@ -155,7 +205,8 @@ If signup is already open, it books (or joins the waiting list) straight away.
 
 ## Running costs
 
-Free: standard GitHub runners are free in public repos, and cron-job.org is free.
+Free: standard GitHub runners are free in public repos, cron-job.org is free,
+and the bot fits easily in Vercel's free Hobby plan (personal, non-commercial use).
 
 ## Known edges
 
