@@ -287,9 +287,10 @@ class WindowRuleTest(unittest.TestCase):
         # Sunday and Monday: 72h.
         self.assertEqual(W(d(2026, 11, 1, 8, 0)), [d(2026, 10, 29, 8, 0)])         # Sun -> Thu
         self.assertEqual(W(d(2026, 11, 2, 8, 0)), [d(2026, 10, 30, 8, 0)])         # Mon -> Fri
-        # Clocks go back on Sun 25 Oct 2026: the same time of day, or an hour later.
-        self.assertEqual(W(d(2026, 10, 25, 8, 0)), [d(2026, 10, 22, 8, 0), d(2026, 10, 22, 9, 0)])
-        self.assertEqual(W(d(2026, 10, 26, 8, 0)), [d(2026, 10, 23, 8, 0), d(2026, 10, 23, 9, 0)])
+        # Clocks go back on Sun 25 Oct 2026, and the gym confirmed those Sunday
+        # and Monday classes open exactly an hour later -- only that time is tried.
+        self.assertEqual(W(d(2026, 10, 25, 8, 0)), [d(2026, 10, 22, 9, 0)])
+        self.assertEqual(W(d(2026, 10, 26, 7, 0)), [d(2026, 10, 23, 8, 0)])
         # ...but a 48h class that opens after the change has one time.
         self.assertEqual(W(d(2026, 10, 27, 8, 0)), [d(2026, 10, 25, 8, 0)])
         # Clocks go forward on Fri 26 Mar 2027: an hour earlier, or the same time.

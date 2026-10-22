@@ -17,7 +17,7 @@ import pathlib
 import sys
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 try:
@@ -73,14 +73,24 @@ def hours_before_for(target_dt):
     return 72 if target_dt.weekday() in (0, 6) else 48
 
 
+# Class days whose signup opens exactly one hour later than the usual rule:
+# winter time starts on Sunday 25 Oct 2026, and the gym opens the Sunday and
+# Monday classes after it an hour later (Thu/Fri at 09:00 for an 08:00 class).
+# Known from the gym, so only that time is tried -- not the earlier one first.
+ONE_HOUR_LATER_DAYS = {date(2026, 10, 25), date(2026, 10, 26)}
+
+
 def window_candidates_for(target_dt):
     """Every moment the class might become bookable, earliest first.
 
     Almost always one. But on the two weekends a year when Israel's clocks
     change, "72h before" counted on the wall clock and "72h before" counted in
     elapsed time are an hour apart, and Arbox doesn't say which it uses -- so
-    both come back, and the booker tries the earlier, then the later."""
+    both come back, and the booker tries the earlier, then the later. Days in
+    ONE_HOUR_LATER_DAYS have one known time instead."""
     hours = hours_before_for(target_dt)
+    if target_dt.date() in ONE_HOUR_LATER_DAYS:
+        return [target_dt - timedelta(hours=hours) + timedelta(hours=1)]
     candidates = {target_dt - timedelta(hours=hours)}
     if GYM_TZ is not None:
         aware = target_dt.replace(tzinfo=GYM_TZ)

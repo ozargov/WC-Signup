@@ -151,8 +151,8 @@ class BotTest(unittest.TestCase):
         self.assertIn("Next week »", labels)
         self.assertIn("▸Sun 25", labels)
         self.assertIn("Sat 31", labels)
-        # Sunday 25 Oct is the clock-change day; the earlier possible opening is shown.
-        self.assertIn("07:00 W.O.D Hall A · opens Thu 07:00", labels)
+        # Sunday 25 Oct is the clock-change day: it opens an hour later than usual.
+        self.assertIn("07:00 W.O.D Hall A · opens Thu 08:00", labels)
         self.assertEqual(self.world.button("📌 Book")["callback_data"], "n")
 
     def test_pick_switch_days_and_book(self):
@@ -274,7 +274,7 @@ class BotTest(unittest.TestCase):
         w.queue_files["2026-10-27_1900.json"] = {"date": "2026-10-27", "time": "19:00", "category": "Gym"}
         self.say("/list")
         sent = w.last("sendMessage")
-        self.assertIn("• Sun 25/10 07:00 HYROX - books Thu 22/10 07:00", sent["text"])
+        self.assertIn("• Sun 25/10 07:00 HYROX - books Thu 22/10 08:00", sent["text"])
         self.tap_label("❌ Remove Tue 27/10 19:00")
         self.assertEqual(w.dispatches[-1]["action"], "remove")
         self.assertEqual(json.loads(w.dispatches[-1]["classes"]), [{"date": "2026-10-27", "time": "19:00"}])

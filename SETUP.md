@@ -95,6 +95,11 @@ Defined once, in `book_class.py:hours_before_for()`.
 Arbox doesn't say which it uses. `window_candidates_for()` returns both; the run
 tries the earlier, and if signup isn't open yet, waits and tries the later.
 
+When the gym's answer is known, the day goes in `ONE_HOUR_LATER_DAYS` and only
+that time is tried. For winter time on Sun 25 Oct 2026 the app showed the Sunday
+and Monday classes opening an hour later (Thu/Fri at 09:00 for an 08:00 class),
+which is 72 hours of elapsed time.
+
 ## Waiting list ("standby")
 
 The waiting list is unlimited, so a full class is never a dead end. On HTTP 516
